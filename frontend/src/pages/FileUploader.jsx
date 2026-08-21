@@ -1,16 +1,17 @@
 import { useState, useCallback } from "react";
 import { useDropzone } from "react-dropzone";
 import api from "../../api/api";
+
 const steps = [
   {
     n: "01",
     title: "Upload your PDF",
-    desc: "Drag a file in or click to browse. Your PDF is securely sent for conversion.",
+    desc: "Drag a file in or click to browse.",
   },
   {
     n: "02",
-    title: "We convert it",
-    desc: "CloudConvert processes your PDF and converts it into an editable Word document.",
+    title: "We rebuild it",
+    desc: "The layout is read and reconstructed as real, editable paragraphs — not a scanned image.",
   },
   {
     n: "03",
@@ -25,16 +26,16 @@ const features = [
     desc: "Convert straight away, no account or email required.",
   },
   {
-    title: "Fast conversion",
-    desc: "Your PDF is processed and converted into an editable Word file.",
-  },
-  {
-    title: "Easy to use",
-    desc: "Upload one PDF and download the converted DOCX.",
+    title: "Processed, then discarded",
+    desc: "Your file is deleted from our server right after conversion.",
   },
   {
     title: "Keeps formatting",
     desc: "Fonts, spacing and layout are preserved as closely as possible.",
+  },
+  {
+    title: "Honest about limits",
+    desc: "You'll get a clear heads-up if a page couldn't be rebuilt perfectly.",
   },
 ];
 
@@ -43,8 +44,8 @@ export default function FileUploader() {
   const [loading, setLoading] = useState(false);
   const [downloadUrl, setDownloadUrl] = useState(null);
   const [error, setError] = useState(null);
-const [imageOnlyWarning, setImageOnlyWarning] = useState(false);
-  // 1. Loophole Guard on Drop Phase
+  const [imageOnlyWarning, setImageOnlyWarning] = useState(false);
+
   const onDrop = useCallback((acceptedFiles, rejectedFiles) => {
     setDownloadUrl(null);
     setError(null);
@@ -56,8 +57,7 @@ const [imageOnlyWarning, setImageOnlyWarning] = useState(false);
     }
 
     const selectedFile = acceptedFiles[0];
-    
-    // Size Limit Guard (15MB) - Prevents backend memory freeze
+
     if (selectedFile && selectedFile.size > 15 * 1024 * 1024) {
       setError("File size exceeds the 15MB safety limit.");
       return;
@@ -72,30 +72,27 @@ const [imageOnlyWarning, setImageOnlyWarning] = useState(false);
     maxFiles: 1,
   });
 
-  // 2. Secured Convert Trigger
   const handleConvert = async () => {
     if (!file) return;
     setLoading(true);
     setError(null);
     setImageOnlyWarning(false);
     const formData = new FormData();
-    formData.append("pdfFile", file); // Backend file controller name matching
+    formData.append("pdfFile", file);
 
     try {
-       const res = await api.post("/api/convert", formData, {
-      responseType: "blob",
-      headers: { "Content-Type": "multipart/form-data" },
-    });
+      const res = await api.post("/api/convert", formData, {
+        responseType: "blob",
+        headers: { "Content-Type": "multipart/form-data" },
+      });
 
-    // Backend ka header check karo — image-only PDF thi to warn karo
-    if (res.headers["x-conversion-mode"] === "image-only") {
-      setImageOnlyWarning(true);
-    }
+      if (res.headers["x-conversion-mode"] === "image-only") {
+        setImageOnlyWarning(true);
+      }
 
-    const url = window.URL.createObjectURL(new Blob([res.data]));
-    setDownloadUrl(url);
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      setDownloadUrl(url);
     } catch (err) {
-      // Decode Binary Blob Error JSON to Standard Text
       if (err.response && err.response.data) {
         const reader = new FileReader();
         reader.onload = () => {
@@ -129,162 +126,182 @@ const [imageOnlyWarning, setImageOnlyWarning] = useState(false);
   };
 
   return (
-    <div className="min-h-screen bg-stone-50 text-slate-800">
+    <div className="min-h-screen bg-[#ECE9E2] text-[#201E1B]">
+      <style>{`
+        @keyframes stampIn {
+          0% { opacity: 0; transform: scale(1.6) rotate(-14deg); }
+          60% { opacity: 1; transform: scale(0.94) rotate(-7deg); }
+          100% { opacity: 1; transform: scale(1) rotate(-6deg); }
+        }
+        .stamp-mark { animation: stampIn 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+        @media (prefers-reduced-motion: reduce) {
+          .stamp-mark { animation: none; }
+        }
+      `}</style>
+
       {/* Header */}
-      <header className="border-b border-stone-200 bg-white">
+      <header className="border-b border-[#D8D3C7] bg-[#FDFCFA]">
         <div className="max-w-5xl mx-auto px-6 py-5 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded bg-slate-800 flex items-center justify-center">
-              <span className="text-amber-400 font-serif text-sm font-bold">P</span>
+          <div className="flex items-center gap-2.5">
+            <div className="w-7 h-7 border-2 border-[#9F2B1E] rounded-sm flex items-center justify-center -rotate-6">
+              <span className="text-[#9F2B1E] font-mono text-[10px] font-bold">PDF</span>
             </div>
             <span className="font-serif text-lg font-semibold tracking-tight">PdfToWord</span>
           </div>
-          <span className="text-xs uppercase tracking-widest text-stone-400">
+          <span className="font-mono text-xs uppercase tracking-widest text-[#6E685F]">
             PDF &rarr; DOCX
           </span>
         </div>
       </header>
 
       {/* Hero + tool */}
-      <section className="max-w-5xl mx-auto px-6 pt-16 pb-20">
-        <div className="grid md:grid-cols-2 gap-14 items-start">
-          <div>
-            <p className="text-xs uppercase tracking-widest text-amber-600 font-medium mb-4">
-              Free document conversion
-            </p>
-            <h1 className="font-serif text-4xl md:text-5xl font-semibold leading-tight text-slate-900">
-              Turn any PDF into an editable Word file
-            </h1>
-            <p className="mt-5 text-stone-500 text-lg leading-relaxed max-w-md">
-              Upload a PDF and get back a clean .docx you can actually edit —
-              layout and formatting preserved, no watermark, no waiting on a
-              third-party service.
-            </p>
+      <section className="relative overflow-hidden">
+        <div
+          className="absolute inset-0 opacity-[0.35] pointer-events-none"
+          style={{
+            backgroundImage:
+              "linear-gradient(#D8D3C7 1px, transparent 1px), linear-gradient(90deg, #D8D3C7 1px, transparent 1px)",
+            backgroundSize: "28px 28px",
+            maskImage: "linear-gradient(to bottom, black, transparent)",
+          }}
+        />
+        <div className="max-w-5xl mx-auto px-6 pt-16 pb-20 relative">
+          <div className="grid md:grid-cols-2 gap-14 items-start">
+            <div>
+              <p className="font-mono text-xs uppercase tracking-widest text-[#9F2B1E] font-medium mb-4">
+                Local conversion, not a middleman
+              </p>
+              <h1 className="font-serif text-4xl md:text-5xl font-semibold leading-tight text-[#1C1B19]">
+                Turn any PDF into an editable Word file
+              </h1>
+              <p className="mt-5 text-[#6E685F] text-lg leading-relaxed max-w-md">
+                Upload a PDF and get back a clean .docx you can actually edit
+                — rebuilt paragraph by paragraph, right here, with no
+                third-party converter in between.
+              </p>
 
-            <dl className="mt-10 grid grid-cols-2 gap-6 max-w-sm">
-              <div>
-                <dt className="text-xs uppercase tracking-wide text-stone-400">Engine</dt>
-                <dd className="mt-1 text-sm font-medium text-slate-700">LibreOffice, self-hosted</dd>
-              </div>
-              <div>
-                <dt className="text-xs uppercase tracking-wide text-stone-400">Output</dt>
-                <dd className="mt-1 text-sm font-medium text-slate-700">.docx, ready to edit</dd>
-              </div>
-            </dl>
-          </div>
+              
+            </div>
 
-          {/* Tool card */}
-          <div className="bg-white border border-stone-200 rounded-xl p-6 shadow-sm">
-            {!downloadUrl ? (
-              <>
-                <div
-                  {...getRootProps()}
-                  className={`border-2 border-dashed rounded-lg py-12 px-4 text-center cursor-pointer transition
-                    ${isDragActive ? "border-amber-500 bg-amber-50" : "border-stone-300 hover:border-stone-400"}`}
-                >
-                  <input {...getInputProps()} />
-                  {file ? (
-                    <div>
-                      <p className="text-sm font-medium text-slate-700">{file.name}</p>
-                      <p className="text-xs text-stone-400 mt-1">{formatSize(file.size)}</p>
-                    </div>
-                  ) : (
-                    <div>
-                      <p className="text-sm font-medium text-slate-700">
-                        {isDragActive ? "Drop it here" : "Drag a PDF here"}
-                      </p>
-                      <p className="text-xs text-stone-400 mt-1">or click to browse — max one file</p>
-                    </div>
+            {/* Tool card */}
+            <div className="bg-[#FDFCFA] border border-[#D8D3C7] rounded-xl p-6 shadow-sm">
+              {!downloadUrl ? (
+                <>
+                  <div
+                    {...getRootProps()}
+                    className={`border-2 border-dashed rounded-lg py-12 px-4 text-center cursor-pointer transition
+                      ${isDragActive ? "border-[#9F2B1E] bg-[#9F2B1E]/5" : "border-[#D8D3C7] hover:border-[#B3ACA0]"}`}
+                  >
+                    <input {...getInputProps()} />
+                    {file ? (
+                      <div>
+                        <p className="text-sm font-medium text-[#1C1B19]">{file.name}</p>
+                        <p className="font-mono text-xs text-[#6E685F] mt-1">{formatSize(file.size)}</p>
+                      </div>
+                    ) : (
+                      <div>
+                        <p className="text-sm font-medium text-[#1C1B19]">
+                          {isDragActive ? "Drop it here" : "Drag a PDF here"}
+                        </p>
+                        <p className="text-xs text-[#6E685F] mt-1">or click to browse — max one file</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {error && <p className="text-sm text-[#9F2B1E] mt-3 font-medium">{error}</p>}
+
+                  <button
+                    onClick={handleConvert}
+                    disabled={!file || loading}
+                    className="mt-5 w-full bg-[#1C1B19] text-[#FDFCFA] text-sm font-medium py-3 rounded-lg
+                      hover:bg-[#33312D] transition disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {loading ? "Reconstructing layout..." : "Convert to Word"}
+                  </button>
+
+                  {file && !loading && (
+                    <button
+                      onClick={reset}
+                      className="mt-2 w-full text-xs text-[#6E685F] hover:text-[#1C1B19] transition"
+                    >
+                      Remove file
+                    </button>
                   )}
-                </div>
+                </>
+              ) : (
+                <div className="text-center py-8">
+                  <div className="stamp-mark inline-flex flex-col items-center justify-center w-24 h-24 border-[3px] border-double border-[#9F2B1E] rounded-full -rotate-6">
+                    <span className="font-mono text-[10px] font-bold tracking-widest text-[#9F2B1E]">
+                      CONVERTED
+                    </span>
+                    <span className="text-[#9F2B1E] text-xl leading-none mt-1">✓</span>
+                  </div>
 
-                {error && <p className="text-sm text-red-500 mt-3 font-medium">{error}</p>}
+                  <p className="text-sm font-medium text-[#1C1B19] mt-5">Your file is ready</p>
+                  <p className="font-mono text-xs text-[#6E685F] mt-1 mb-6">
+                    {file?.name.replace(".pdf", ".docx")}
+                  </p>
 
-                <button
-                  onClick={handleConvert}
-                  disabled={!file || loading}
-                  className="mt-5 w-full bg-slate-800 text-white text-sm font-medium py-3 rounded-lg
-                    hover:bg-slate-700 transition disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  {loading ? "Reconstructing Layout..." : "Convert to Word"}
-                </button>
+                  {imageOnlyWarning && (
+                    <p className="text-xs text-[#7A5A16] bg-[#A9822E]/10 border border-[#A9822E]/40 rounded-md px-3 py-2 mb-4 text-left">
+                      This PDF appears to be scanned or image-based — the text couldn't be
+                      made editable. The images have been embedded as-is.
+                    </p>
+                  )}
 
-                {file && !loading && (
+                  
+                     <a href={downloadUrl}
+                    download={file?.name.replace(".pdf", ".docx")}
+                    className="block w-full bg-[#9F2B1E] text-white text-sm font-medium py-3 rounded-lg hover:bg-[#831F14] transition text-center"
+                  >
+                    Download .docx
+                  </a>
                   <button
                     onClick={reset}
-                    className="mt-2 w-full text-xs text-stone-400 hover:text-stone-600 transition"
+                    className="mt-3 text-xs text-[#6E685F] hover:text-[#1C1B19] transition"
                   >
-                    Remove file
+                    Convert another file
                   </button>
-                )}
-              </>
-            ) : (
-              <div className="text-center py-8">
-                <div className="w-12 h-12 mx-auto rounded-full bg-green-100 flex items-center justify-center mb-4">
-                  <span className="text-green-600 text-xl font-bold">✓</span>
                 </div>
-                <p className="text-sm font-medium text-slate-700">Your file is ready</p>
-                <p className="text-xs text-stone-400 mt-1 mb-6">{file?.name.replace(".pdf", ".docx")}</p>
-
-                {imageOnlyWarning && (
-  <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 mb-4 text-left">
-    This PDF appears to be scanned or image-based — the text couldn't be
-    made editable. The images have been embedded as-is.
-  </p>
-)}
-
-                <a
-                  href={downloadUrl}
-                  download={file?.name.replace(".pdf", ".docx")}
-                  className="block w-full bg-amber-600 text-white text-sm font-medium py-3 rounded-lg hover:bg-amber-700 transition text-center"
-                >
-                  Download .docx
-                </a>
-                <button
-                  onClick={reset}
-                  className="mt-3 text-xs text-stone-400 hover:text-stone-600 transition"
-                >
-                  Convert another file
-                </button>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
       </section>
 
       {/* How it works */}
-      <section className="border-t border-stone-200 bg-white">
+      <section className="border-t border-[#D8D3C7] bg-[#FDFCFA]">
         <div className="max-w-5xl mx-auto px-6 py-16">
-          <h2 className="font-serif text-2xl font-semibold text-slate-900 mb-10">How it works</h2>
+          <h2 className="font-serif text-2xl font-semibold text-[#1C1B19] mb-10">How it works</h2>
           <div className="grid md:grid-cols-3 gap-10">
             {steps.map((s) => (
               <div key={s.n}>
-                <span className="font-serif text-sm text-amber-600 block mb-2">{s.n}</span>
-                <h3 className="text-base font-semibold text-slate-800 mb-1">{s.title}</h3>
-                <p className="text-sm text-stone-500 leading-relaxed">{s.desc}</p>
+                <span className="font-mono text-sm text-[#9F2B1E] block mb-2">{s.n}</span>
+                <h3 className="text-base font-semibold text-[#1C1B19] mb-1">{s.title}</h3>
+                <p className="text-sm text-[#6E685F] leading-relaxed">{s.desc}</p>
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      <section className="border-t border-stone-200 bg-white">
-  <div className="max-w-5xl mx-auto px-6 py-6">
-    <p className="text-xs text-stone-400 text-center">
-      Note: Complex layouts — multi-column pages, nested tables, or heavily
-      designed resumes — may have minor formatting differences after conversion.
-    </p>
-  </div>
-</section>
+      <section className="border-t border-[#D8D3C7] bg-[#FDFCFA]">
+        <div className="max-w-5xl mx-auto px-6 py-6">
+          <p className="text-xs text-[#6E685F] text-center">
+            Complex layouts — multi-column pages, dense tables, or heavily designed
+            resumes — may shift slightly during conversion.
+          </p>
+        </div>
+      </section>
 
       {/* Features */}
-      <section className="border-t border-stone-200 bg-stone-50">
+      <section className="border-t border-[#D8D3C7] bg-[#ECE9E2]">
         <div className="max-w-5xl mx-auto px-6 py-16">
           <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-8">
             {features.map((f, i) => (
               <div key={i}>
-                <h4 className="text-sm font-semibold text-slate-800 mb-1">{f.title}</h4>
-                <p className="text-xs text-stone-500 leading-relaxed">{f.desc}</p>
+                <h4 className="text-sm font-semibold text-[#1C1B19] mb-1">{f.title}</h4>
+                <p className="text-xs text-[#6E685F] leading-relaxed">{f.desc}</p>
               </div>
             ))}
           </div>
