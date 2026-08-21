@@ -10,7 +10,12 @@ import io
 app = Flask(__name__)
 CORS(app)  # allows the frontend (different port/domain) to call this API
 
-MAX_FILE_SIZE = 50 * 1024 * 1024 # 15MB
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
+
+
+@app.route('/', methods=['GET'])
+def index():
+    return jsonify({'message': 'API is working'})
 
 
 def inspect_pdf(path):
@@ -51,10 +56,9 @@ def convert_pdf_to_word():
         return jsonify({'error': 'The uploaded file is empty or corrupted.'}), 400
 
     if len(file_bytes) > MAX_FILE_SIZE:
-        return jsonify({'error': 'File exceeds the 15MB limit.'}), 400
+        return jsonify({'error': 'File exceeds the 50MB limit.'}), 400
 
     unique_id = uuid.uuid4().hex
-    # /tmp is the only writable directory on Vercel's Python runtime
     input_path = os.path.join(tempfile.gettempdir(), f'input_{unique_id}.pdf')
     output_path = os.path.join(tempfile.gettempdir(), f'output_{unique_id}.docx')
 
@@ -62,8 +66,6 @@ def convert_pdf_to_word():
         with open(input_path, 'wb') as f:
             f.write(file_bytes)
 
-        # ---- Pre-checks: fail fast with a clear message instead of a
-        # ---- generic error after wasting time on a doomed conversion.
         try:
             info = inspect_pdf(input_path)
         except Exception as e:
@@ -76,9 +78,6 @@ def convert_pdf_to_word():
             }), 422
 
         image_only_warning = not info['has_text']
-        # We still attempt the conversion below even if there's no text layer —
-        # pdf2docx will embed the scanned pages as images rather than fail outright.
-        # The frontend is told via a header so it can warn the user honestly.
 
         cv = Converter(input_path)
         cv.convert(output_path)
@@ -87,8 +86,6 @@ def convert_pdf_to_word():
         if not os.path.exists(output_path):
             return jsonify({'error': 'Conversion failed. Please try a different file.'}), 500
 
-        # Read into memory before cleanup, so the temp file can be deleted
-        # immediately instead of lingering until Flask finishes streaming it.
         with open(output_path, 'rb') as f:
             docx_bytes = f.read()
 
@@ -124,7 +121,5 @@ def health():
     return jsonify({'status': 'ok'})
 
 
-# Needed for local testing (python api/index.py). Vercel calls the `app`
-# object directly and never executes this block.
 if __name__ == '__main__':
     app.run(debug=True, port=5001)
