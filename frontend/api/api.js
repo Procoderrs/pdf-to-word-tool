@@ -5,6 +5,7 @@ const api = axios.create({
   withCredentials:true,
 });
 
+VITE_PYTHON_API_URL=https://pdf-to-word-tool-psi.vercel.app
 
 export default api; */
 
@@ -18,3 +19,21 @@ const pythonApi = axios.create({
 });
 
 export default pythonApi;
+
+
+
+/* 
+
+
+cv = Converter(input_path)
+        cv.convert(
+            output_path,
+            # --- Testing these for layout-misalignment issues ---
+            line_break_width_ratio=0.3,           # default 0.5 — lower catches line-breaks earlier
+            new_paragraph_free_space_ratio=0.75,  # default 0.85 — lower merges fewer lines into one paragraph
+            lines_left_aligned_threshold=2.0,     # default 1.0 — more tolerant of small alignment differences
+            lines_right_aligned_threshold=2.0,    # default 1.0
+            connected_border_tolerance=1.0,       # default 0.5 — more tolerant table border joining
+        )
+        cv.close()
+*/
