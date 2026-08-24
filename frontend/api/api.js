@@ -6,7 +6,7 @@ const api = axios.create({
 });
 
 VITE_PYTHON_API_URL=https://pdf-to-word-tool-psi.vercel.app
-
+VITE_PYTHON_API_URL=http://localhost:5001
 export default api; */
 
 
