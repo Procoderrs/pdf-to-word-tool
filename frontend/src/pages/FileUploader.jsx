@@ -98,7 +98,7 @@ export default function FileUploader() {
         reader.onload = () => {
           try {
             const errorObj = JSON.parse(reader.result);
-            setError(errorObj.error || "Conversion failed. Please try again.");
+            setError(errorObj.detail || errorObj.error || "Conversion failed. Please try again.");
           } catch (e) {
             setError("An unexpected server parsing error occurred.");
           }
