@@ -20,14 +20,7 @@ FLAG_ITALIC = 2
 FLAG_BOLD = 16
 POINTS_PER_INCH = 72
 
-HEADING_SIZE_THRESHOLD = 20  # pt
-HEADING_FONT_SIZE = Pt(20)
-
 TABLE_OVERLAP_THRESHOLD = 0.5
-
-# Fallback font if a PDF's embedded font name can't be cleanly mapped —
-# every system has this, so text never silently falls back to something
-# unpredictable.
 DEFAULT_FONT_NAME = "Calibri"
 
 
@@ -52,27 +45,52 @@ def inspect_pdf(path):
 
 
 def clean_font_name(raw_font_name):
-    """
-    PDF embedded font names often look like 'AAAAAA+CanvaSans-Bold'
-    (a subset prefix + PostScript style suffix). Word doesn't recognize
-    that exact name, so we strip the subset prefix and common style
-    suffixes to get something closer to a real font family name. If the
-    result still isn't a font installed on the reader's machine, Word
-    silently substitutes a default — this just gives it a cleaner name
-    to try first.
-    """
     if not raw_font_name:
         return DEFAULT_FONT_NAME
 
     name = raw_font_name
     if '+' in name:
-        name = name.split('+', 1)[1]  # drop subset prefix like "AAAAAA+"
+        name = name.split('+', 1)[1]
 
     for suffix in ('-Bold', '-Italic', '-BoldItalic', '-Regular', ',Bold', ',Italic'):
         if name.endswith(suffix):
             name = name[: -len(suffix)]
 
     return name or DEFAULT_FONT_NAME
+
+
+def get_heading_style(max_size_pt):
+    """
+    Maps a detected PDF font size to a standard document heading tier
+    (H1-H6), based on common professional-document conventions:
+      H1: 20-36pt | H2: 16-20pt | H3: 14-16pt | H4-H6: 12-14pt
+      Body text: 10-12pt (left as normal paragraph text, untouched)
+    """
+    if max_size_pt >= 20:
+        return {'size': Pt(28), 'bold': True, 'italic': False, 'center': True}
+    elif max_size_pt >= 14:
+        return {'size': Pt(15), 'bold': False, 'italic': False, 'center': False}
+   
+    else:
+        return None
+
+
+def enable_hyphenation(document):
+    try:
+        settings_element = document.settings.element
+
+        auto_hyphenation = OxmlElement('w:autoHyphenation')
+        settings_element.append(auto_hyphenation)
+
+        hyphenation_zone = OxmlElement('w:hyphenationZone')
+        hyphenation_zone.set(qn('w:val'), "360")
+        settings_element.append(hyphenation_zone)
+
+        consecutive_limit = OxmlElement('w:consecutiveHyphenLimit')
+        consecutive_limit.set(qn('w:val'), "2")
+        settings_element.append(consecutive_limit)
+    except Exception as e:
+        print(f"Hyphenation setup skipped: {e}")
 
 
 def rects_overlap_ratio(block_bbox, table_bbox):
@@ -94,11 +112,6 @@ def rects_overlap_ratio(block_bbox, table_bbox):
 
 
 def set_repeat_header_row(row):
-    """
-    python-docx has no high-level API for 'repeat as header row on every
-    page' — it has to be set via the raw OOXML <w:trPr><w:tblHeader/>
-    element on the row.
-    """
     tr = row._tr
     trPr = tr.get_or_add_trPr()
     tblHeader = OxmlElement('w:tblHeader')
@@ -115,10 +128,6 @@ def add_table_to_doc(document, table_data, usable_width_in):
 
     docx_table = document.add_table(rows=num_rows, cols=num_cols)
     docx_table.style = 'Table Grid'
-
-    # Fixed, equal column widths based on the page's usable width — avoids
-    # Word auto-compressing columns for wide text (e.g. long English words
-    # in a large data table), which is what causes cramped/broken cells.
     docx_table.autofit = False
     col_width = Inches(usable_width_in / num_cols)
     for col in docx_table.columns:
@@ -130,10 +139,8 @@ def add_table_to_doc(document, table_data, usable_width_in):
                 continue
             cell = docx_table.cell(row_index, col_index)
             cell.text = str(cell_text) if cell_text is not None else ''
-            cell.width = col_width  # python-docx needs this set per-cell too
+            cell.width = col_width
 
-        # Repeat the first row as a header on every page this table spans —
-        # important for large tables that split across multiple pages.
         if row_index == 0:
             set_repeat_header_row(docx_table.rows[0])
 
@@ -142,9 +149,6 @@ def convert_pdf_to_docx(pdf_path, docx_path):
     pdf = fitz.open(pdf_path)
     document = Document()
 
-    # --- Page size + margins: match the PDF's own page size instead of
-    # Word's default Letter/1-inch-margin layout, so text wraps roughly
-    # where it did in the source PDF. ---
     first_page = pdf[0]
     page_width_in = first_page.rect.width / POINTS_PER_INCH
     page_height_in = first_page.rect.height / POINTS_PER_INCH
@@ -152,21 +156,20 @@ def convert_pdf_to_docx(pdf_path, docx_path):
     section = document.sections[0]
     section.page_width = Inches(page_width_in)
     section.page_height = Inches(page_height_in)
+    # Standard professional-document margins: 1 inch on all sides.
     section.left_margin = Inches(1)
     section.right_margin = Inches(1)
     section.top_margin = Inches(1)
     section.bottom_margin = Inches(1)
 
-    usable_width_in = page_width_in - 2  # minus left+right margin, for table sizing
+    usable_width_in = page_width_in - 2
 
-    # Tighten default paragraph spacing — Word's default "Normal" style adds
-    # extra space after each paragraph, which compounds since every PDF
-    # line/paragraph becomes its own docx paragraph, making the document
-    # visually "looser" than the source PDF.
     normal_style = document.styles['Normal']
     normal_style.paragraph_format.space_after = Pt(0)
     normal_style.paragraph_format.space_before = Pt(0)
     normal_style.paragraph_format.line_spacing = 1.0
+
+    enable_hyphenation(document)
 
     for page_num, page in enumerate(pdf):
         text_dict = page.get_text("dict")
@@ -237,10 +240,16 @@ def convert_pdf_to_docx(pdf_path, docx_path):
                     if line_index < len(block["lines"]) - 1:
                         paragraph.add_run(" ")
 
-                if max_size_in_paragraph >= HEADING_SIZE_THRESHOLD:
-                    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                # --- Standard heading hierarchy normalization ---
+                heading_style = get_heading_style(max_size_in_paragraph)
+                if heading_style:
+                    if heading_style['center']:
+                        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     for run in paragraph.runs:
-                        run.font.size = HEADING_FONT_SIZE
+                        run.font.size = heading_style['size']
+                        run.bold = heading_style['bold']
+                        if heading_style['italic']:
+                            run.italic = True
 
             elif block["type"] == 1:
                 image_bytes = block.get("image")
