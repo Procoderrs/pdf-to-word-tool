@@ -9,7 +9,7 @@ functions (no native binaries allowed there). Fine on Render/Railway/a
 VM where you control OS packages — or swap this for a cloud OCR API
 call if Vercel is the hard requirement.
 """
-from pdf_analyzer import page_has_text
+from .pdf_analyzer import page_has_text
 
 
 def get_page_text_dict(page):

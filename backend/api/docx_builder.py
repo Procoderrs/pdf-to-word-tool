@@ -11,15 +11,15 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 
-from ocr_handler import get_page_text_dict
-from layout_parser import (
+from .ocr_handler import get_page_text_dict
+from .layout_parser import (
     clean_font_name, get_heading_style, enable_hyphenation,
     rects_overlap_ratio, spans_need_space, set_run_font,
     find_column_gap, order_items_for_columns, get_sidebar_fill_color,
     get_page_background_color,
     FULL_WIDTH_RATIO_THRESHOLD,
 )
-from table_handler import add_table_to_doc
+from .table_handler import add_table_to_doc
 
 FLAG_ITALIC = 2
 FLAG_BOLD = 16
