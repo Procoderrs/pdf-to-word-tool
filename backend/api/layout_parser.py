@@ -1,0 +1,253 @@
+"""
+Layout Parser — Stage 3 of the pipeline.
+Column-layout detection + text-run helpers (font cleanup, heading
+detection, hyphenation, and the missing-space fix).
+"""
+from docx.oxml.ns import qn
+from docx.oxml import OxmlElement
+from docx.shared import Pt
+from collections import Counter
+
+FULL_WIDTH_RATIO_THRESHOLD = 0.6
+MIN_GUTTER_WIDTH = 14  # lowered from 20 -> catches tighter gutters (sidebar resumes etc.)
+DEFAULT_FONT_NAME = "Calibri"
+
+
+def clean_font_name(raw_font_name):
+    if not raw_font_name:
+        return DEFAULT_FONT_NAME
+    name = raw_font_name
+    if '+' in name:
+        name = name.split('+', 1)[1]
+    for suffix in ('-Bold', '-Italic', '-BoldItalic', '-Regular', ',Bold', ',Italic'):
+        if name.endswith(suffix):
+            name = name[: -len(suffix)]
+    return name or DEFAULT_FONT_NAME
+
+
+def get_heading_style(max_size_pt):
+    if max_size_pt >= 20:
+        return {'size': Pt(28), 'bold': True, 'italic': False, 'center': True}
+    elif max_size_pt >= 14:
+        return {'size': Pt(15), 'bold': False, 'italic': False, 'center': False}
+    else:
+        return None
+
+
+def enable_hyphenation(document):
+    try:
+        settings_element = document.settings.element
+        auto_hyphenation = OxmlElement('w:autoHyphenation')
+        settings_element.append(auto_hyphenation)
+        hyphenation_zone = OxmlElement('w:hyphenationZone')
+        hyphenation_zone.set(qn('w:val'), "360")
+        settings_element.append(hyphenation_zone)
+        consecutive_limit = OxmlElement('w:consecutiveHyphenLimit')
+        consecutive_limit.set(qn('w:val'), "2")
+        settings_element.append(consecutive_limit)
+    except Exception as e:
+        print(f"Hyphenation setup skipped: {e}")
+
+
+def rects_overlap_ratio(block_bbox, table_bbox):
+    bx0, by0, bx1, by1 = block_bbox
+    tx0, ty0, tx1, ty1 = table_bbox
+    ix0, iy0 = max(bx0, tx0), max(by0, ty0)
+    ix1, iy1 = min(bx1, tx1), min(by1, ty1)
+    if ix1 <= ix0 or iy1 <= iy0:
+        return 0.0
+    intersection_area = (ix1 - ix0) * (iy1 - iy0)
+    block_area = (bx1 - bx0) * (by1 - by0)
+    if block_area == 0:
+        return 0.0
+    return intersection_area / block_area
+
+
+# --- FIX #1: missing spaces between words ---
+# ("Results-drivenmarketingleaderwith10+year...")
+# PyMuPDF sometimes splits justified/proportionally-spaced text into
+# multiple spans WITHOUT a literal space character between them — the
+# space only exists as a horizontal gap on the page, not as a character.
+# Directly concatenating span["text"] (old code) loses that gap. This
+# checks the gap and tells the caller to insert a space when needed.
+def spans_need_space(prev_span, next_span):
+    if not prev_span:
+        return False
+    prev_text = prev_span["text"]
+    if not prev_text or prev_text.endswith(" "):
+        return False
+    gap = next_span["bbox"][0] - prev_span["bbox"][2]
+    avg_char_width = prev_span["size"] * 0.25
+    return gap > avg_char_width
+
+
+# --- Column detection (2-column layout) ---
+def find_column_gap(narrow_items, page_width):
+    intervals = sorted((item['bbox'][0], item['bbox'][2]) for item in narrow_items)
+    if not intervals:
+        return None
+
+    merged = []
+    for start, end in intervals:
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+
+    if len(merged) < 2:
+        return None
+
+    gaps = []
+    for i in range(len(merged) - 1):
+        gap_start = merged[i][1]
+        gap_end = merged[i + 1][0]
+        gaps.append((gap_end - gap_start, gap_start, gap_end))
+
+    gaps.sort(reverse=True)
+    widest_width, gap_start, gap_end = gaps[0]
+    gap_center_ratio = ((gap_start + gap_end) / 2) / page_width
+
+    # DEBUG: leave this print in until the 2-column case is confirmed fixed
+    # on your actual resume PDFs — send me this output if it still misfires.
+    print(f"[layout_parser] gap candidate: width={widest_width:.1f}pt center_ratio={gap_center_ratio:.2f}")
+
+    # NOTE: widened the acceptable center range (0.15-0.85, was 0.2-0.8) and
+    # lowered MIN_GUTTER_WIDTH (14, was 20) — sidebar-style resumes often
+    # have a tighter/off-center gutter than a classic magazine 2-column page.
+    if widest_width >= MIN_GUTTER_WIDTH and 0.15 <= gap_center_ratio <= 0.85:
+        return (gap_start, gap_end)
+    return None
+
+
+def assign_to_column(bbox, gap_start, gap_end, page_width):
+    bx0, bx1 = bbox[0], bbox[2]
+    if (bx1 - bx0) >= FULL_WIDTH_RATIO_THRESHOLD * page_width:
+        return 'full'
+    if bx1 <= gap_start:
+        return 'left'
+    elif bx0 >= gap_end:
+        return 'right'
+    else:
+        return 'full'
+
+
+def order_items_for_columns(items, gap_start, gap_end, page_width):
+    left_items, right_items, full_items = [], [], []
+    for item in items:
+        column = assign_to_column(item['bbox'], gap_start, gap_end, page_width)
+        if column == 'left':
+            left_items.append(item)
+        elif column == 'right':
+            right_items.append(item)
+        else:
+            full_items.append(item)
+
+    left_items.sort(key=lambda i: i['bbox'][1])
+    right_items.sort(key=lambda i: i['bbox'][1])
+    full_items.sort(key=lambda i: i['bbox'][1])
+
+    left_top = left_items[0]['bbox'][1] if left_items else None
+    right_top = right_items[0]['bbox'][1] if right_items else None
+    tops = [t for t in (left_top, right_top) if t is not None]
+    # FIX: use the LATER-starting column's top (max, not min). A
+    # full-width heading (e.g. "AUSTIN") that sits above whichever
+    # column starts later — even though the OTHER column (like a photo
+    # box) already starts at y=0 — should count as "above" and print
+    # before the table, not get stranded in "within" (rendered after
+    # the whole table, at the very end of the page).
+    column_top_y = max(tops) if tops else 0
+
+    left_bottom = left_items[-1]['bbox'][3] if left_items else None
+    right_bottom = right_items[-1]['bbox'][3] if right_items else None
+    bottoms = [b for b in (left_bottom, right_bottom) if b is not None]
+    column_bottom_y = max(bottoms) if bottoms else 0
+
+    above = [i for i in full_items if i['bbox'][1] < column_top_y]
+    below = [i for i in full_items if i['bbox'][1] >= column_bottom_y]
+    within = [i for i in full_items if i not in above and i not in below]
+
+    return {
+        'above': above,
+        'left': left_items,
+        'within': within,
+        'right': right_items,
+        'below': below,
+    }
+
+
+# NEW: find the sidebar's background fill color from vector drawings
+def get_sidebar_fill_color(page, gap_start):
+    page_height = page.rect.height
+    best_fill, best_area = None, 0
+    for d in page.get_drawings():
+        if not d.get("fill"):
+            continue
+        for item in d["items"]:
+            if item[0] != "re":
+                continue
+            x0, y0, x1, y1 = item[1]
+            # CHANGED: check x0 instead of x1 — sidebar box can extend
+            # slightly past the text gutter, but it must START at/near
+            # the left page edge, before the gutter begins.
+            if x0 > gap_start:
+                continue
+            height = y1 - y0
+            if height < page_height * 0.5:
+                continue
+            area = (x1 - x0) * height
+            if area > best_area:
+                best_area, best_fill = area, d["fill"]
+    if best_fill:
+        r, g, b = [int(c * 255) for c in best_fill]
+        return (r, g, b)
+    return None
+
+
+
+def set_run_font(run, font_name):
+    """Sets the font name on ALL of Word's font slots (ascii, hAnsi,
+    eastAsia, complex-script) — python-docx's run.font.name only sets
+    ascii/hAnsi by default, which can cause inconsistent rendering."""
+    run.font.name = font_name
+    rPr = run._element.get_or_add_rPr()
+    rFonts = rPr.find(qn('w:rFonts'))
+    if rFonts is None:
+        rFonts = OxmlElement('w:rFonts')
+        rPr.append(rFonts)
+    rFonts.set(qn('w:ascii'), font_name)
+    rFonts.set(qn('w:hAnsi'), font_name)
+    rFonts.set(qn('w:eastAsia'), font_name)
+    rFonts.set(qn('w:cs'), font_name)
+
+
+    # NEW: detect a full-page background fill color (distinct from sidebar detection —
+# this looks for a rectangle covering most/all of the page, not just one column)
+
+def get_page_background_color(page):
+    """Renders the page at low resolution and samples its four corners
+    to find the actual visual background color — more reliable than
+    reasoning about overlapping vector rectangles, which can pick the
+    wrong layer when multiple full-page rects are stacked."""
+    pix = page.get_pixmap(dpi=72)
+    margin = 5  # avoid sampling right on a border line/stroke
+    sample_points = [
+        (margin, margin),
+        (pix.width - margin, margin),
+        (margin, pix.height - margin),
+        (pix.width - margin, pix.height - margin),
+    ]
+    colors = []
+    for x, y in sample_points:
+        try:
+            colors.append(pix.pixel(x, y))
+        except Exception:
+            continue
+    if not colors:
+        return None
+
+    most_common_color, count = Counter(colors).most_common(1)[0]
+    # require at least 3 of 4 corners to agree — otherwise it's probably
+    # not a uniform background (e.g. an image bleeds to the edge)
+    if count < 3:
+        return None
+    return tuple(most_common_color[:3])  # drop alpha if present

@@ -1,0 +1,116 @@
+# ==========================================
+# Python Backend
+# ==========================================
+
+# Virtual environments
+backend/venv/
+backend/.venv/
+backend/env/
+backend/ENV/
+
+# Python cache
+backend/__pycache__/
+backend/**/__pycache__/
+*.py[cod]
+
+# Python testing/cache
+backend/.pytest_cache/
+backend/.mypy_cache/
+backend/.coverage
+backend/htmlcov/
+
+# Python build files
+backend/build/
+backend/dist/
+backend/*.egg-info/
+
+
+# ==========================================
+# React / Node Frontend
+# ==========================================
+
+# Dependencies
+frontend/node_modules/
+
+# Vite / React build
+frontend/dist/
+frontend/build/
+frontend/.vite/
+
+# npm logs
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+frontend/pnpm-debug.log*
+
+
+# ==========================================
+# Environment Variables
+# ==========================================
+
+.env
+.env.*
+!.env.example
+
+backend/.env
+frontend/.env
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.test.local
+frontend/.env.production.local
+
+
+# ==========================================
+# IDE / Editors
+# ==========================================
+
+.vscode/
+.idea/
+.history/
+
+
+# ==========================================
+# Operating System
+# ==========================================
+
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+
+# ==========================================
+# Logs
+# ==========================================
+
+*.log
+logs/
+
+
+# ==========================================
+# Temporary Files
+# ==========================================
+
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+
+# ==========================================
+# Generated / Temporary Backend Files
+# ==========================================
+
+backend/uploads/
+backend/output/
+backend/temp/
+backend/tmp/
+
+
+# ==========================================
+# Local Databases
+# ==========================================
+
+*.sqlite
+*.sqlite3
+*.db
