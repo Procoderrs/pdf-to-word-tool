@@ -251,37 +251,3 @@ def get_page_background_color(page):
     if count < 3:
         return None
     return tuple(most_common_color[:3])  # drop alpha if present
-
-
-
-
-BAND_GAP_THRESHOLD_PT = 30  # tune this based on debug output — gap between
-# items within the same layout section vs. gap between different sections
-
-def split_into_row_bands(items):
-    """Groups a page's items into vertical 'bands' — contiguous stretches
-    of content with no real gap between them. A large vertical gap marks
-    a new layout section (e.g. a new image+text pair in a magazine page).
-    Column-detection then runs independently inside each band, instead
-    of once for the whole page."""
-    if not items:
-        return []
-
-    sorted_items = sorted(items, key=lambda i: i['bbox'][1])
-
-    bands = []
-    current_band = [sorted_items[0]]
-    current_bottom = sorted_items[0]['bbox'][3]
-
-    for item in sorted_items[1:]:
-        item_top = item['bbox'][1]
-        if item_top - current_bottom > BAND_GAP_THRESHOLD_PT:
-            bands.append(current_band)
-            current_band = [item]
-            current_bottom = item['bbox'][3]
-        else:
-            current_band.append(item)
-            current_bottom = max(current_bottom, item['bbox'][3])
-
-    bands.append(current_band)
-    return bands
