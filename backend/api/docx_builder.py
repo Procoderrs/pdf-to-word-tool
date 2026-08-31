@@ -16,7 +16,7 @@ from layout_parser import (
     clean_font_name, get_heading_style, enable_hyphenation,
     rects_overlap_ratio, spans_need_space, set_run_font,
     find_column_gap, order_items_for_columns, get_sidebar_fill_color,
-    get_page_background_color,
+    get_page_background_color, split_into_row_bands,
     FULL_WIDTH_RATIO_THRESHOLD,
 )
 from table_handler import add_table_to_doc
@@ -363,37 +363,45 @@ def convert_pdf_to_docx(pdf_path, docx_path):
 
             items.append({'bbox': block_bbox, 'kind': 'block', 'data': block})
 
-        narrow_items = [
-            i for i in items
-            if (i['bbox'][2] - i['bbox'][0]) < FULL_WIDTH_RATIO_THRESHOLD * page_width_pt
-        ]
-        gap = find_column_gap(narrow_items, page_width_pt)
+            bands = split_into_row_bands(items)
+        print(f"[docx_builder] page {page_num + 1}: split into {len(bands)} row band(s)")
 
-        if gap:
-            gap_start, gap_end = gap
-            groups = order_items_for_columns(items, gap_start, gap_end, page_width_pt)
+        for band_index, band_items in enumerate(bands):
+            band_top = min(i['bbox'][1] for i in band_items)
+            band_bottom = max(i['bbox'][3] for i in band_items)
+            print(f"[docx_builder]   band {band_index}: y=({band_top:.1f},{band_bottom:.1f}), {len(band_items)} items")
 
-            sidebar_color = get_sidebar_fill_color(page, gap_start)
-            print(f"[docx_builder] page {page_num + 1}: sidebar_color detected: {sidebar_color}")
+            narrow_items = [
+                i for i in band_items
+                if (i['bbox'][2] - i['bbox'][0]) < FULL_WIDTH_RATIO_THRESHOLD * page_width_pt
+            ]
+            gap = find_column_gap(narrow_items, page_width_pt)
 
-            for item in groups['above']:
-                if item['kind'] == 'table':
-                    add_table_to_doc(document, item['data'], usable_width_in,page,item.get('table_obj'))
+            if gap:
+                gap_start, gap_end = gap
+                groups = order_items_for_columns(band_items, gap_start, gap_end, page_width_pt)
 
-                else:
-                    add_block_to_container(document, item['data'], page_width_pt, content_bounds)
+                sidebar_color = get_sidebar_fill_color(page, gap_start)
+                print(f"[docx_builder]     band {band_index}: sidebar_color detected: {sidebar_color}")
 
-            render_two_column_table(document, groups['left'], groups['right'],
-                                     gap_start, gap_end, page_width_pt,
-                                     usable_width_in, sidebar_color)
+                for item in groups['above']:
+                    if item['kind'] == 'table':
+                        add_table_to_doc(document, item['data'], usable_width_in, page, item.get('table_obj'))
+                    else:
+                        add_block_to_container(document, item['data'], page_width_pt, content_bounds)
 
-            for item in groups['within'] + groups['below']:
-                if item['kind'] == 'table':
-                 add_table_to_doc(document, item['data'], usable_width_in,page,item.get('table_obj'))
-                else:
-                    add_block_to_container(document, item['data'], page_width_pt, content_bounds)
+                render_two_column_table(document, groups['left'], groups['right'],
+                                         gap_start, gap_end, page_width_pt,
+                                         usable_width_in, sidebar_color)
 
-            continue  # this page is done — skip the single-column loop below
+                for item in groups['within'] + groups['below']:
+                    if item['kind'] == 'table':
+                        add_table_to_doc(document, item['data'], usable_width_in, page, item.get('table_obj'))
+                    else:
+                        add_block_to_container(document, item['data'], page_width_pt, content_bounds)
+            
+
+         # this page is done — skip the single-column loop below
 
         # No column gap found -> single-column fallback
         print(f"[docx_builder] page {page_num + 1}: no column gap found, falling back to single-column y-sort")

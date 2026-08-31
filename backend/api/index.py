@@ -5,8 +5,8 @@ import os
 import uuid
 import io
 
-from pdf_analyzer import inspect_pdf
-from docx_builder import convert_pdf_to_docx
+from .pdf_analyzer import inspect_pdf
+from .docx_builder import convert_pdf_to_docx
 
 app = Flask(__name__)
 CORS(app)
