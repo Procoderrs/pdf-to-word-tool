@@ -16,7 +16,7 @@ from .layout_parser import (
     clean_font_name, get_heading_style, enable_hyphenation,
     rects_overlap_ratio, spans_need_space, set_run_font,
     find_column_gap, order_items_for_columns, get_sidebar_fill_color,
-    get_page_background_color,
+    get_page_background_color, detect_list_type,get_horizontal_lines,
     FULL_WIDTH_RATIO_THRESHOLD,
 )
 from .table_handler import add_table_to_doc
@@ -68,28 +68,19 @@ def set_document_background(document, rgb):
     settings_element.insert(0, display_bg)
 
 
-def add_block_to_container(container, block, page_width_pt=None, content_bounds=None):
+def add_block_to_container(container, block, page_width_pt=None, content_bounds=None,horizontal_lines=None):
     """container = document OR a table cell — both support add_paragraph().
     page_width_pt / content_bounds are optional; when given, enables
     content-width-aware center-alignment detection for the block."""
     if block["type"] == 0:
         lines = block["lines"]
 
-        # Compute the "typical" (normal, same-paragraph) line-to-line gap.
-        # Include ALL gaps — negative ones too — since those represent
-        # ordinary wrapped-line spacing. A real paragraph break shows up
-        # as a gap noticeably larger than this typical value.
         line_gaps = []
         for i in range(1, len(lines)):
             gap = lines[i]["bbox"][1] - lines[i - 1]["bbox"][3]
             line_gaps.append(gap)
         line_gaps.sort()
         typical_gap = line_gaps[len(line_gaps) // 2] if line_gaps else 0
-
-        # Margin tuned against real PDF measurements: same-paragraph
-        # wrapped-line gaps top out around +0.16pt above typical, while
-        # genuine paragraph breaks start around +0.22pt above typical.
-        # 0.19 sits between the two.
         split_threshold = typical_gap + 0.19
 
         paragraph = container.add_paragraph()
@@ -98,16 +89,22 @@ def add_block_to_container(container, block, page_width_pt=None, content_bounds=
         prev_line_bbox = None
 
         def apply_heading_style_to(para, size):
-            heading_style = get_heading_style(size)
-            if heading_style:
-                if heading_style['center']:
-                    para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                for run in para.runs:
-                    run.font.size = heading_style['size']
-                    run.bold = heading_style['bold']
-                    if heading_style['italic']:
-                        run.italic = True
+            if not para.runs:
+                return
+            first_run = para.runs[0]
+            list_type, cleaned_text = detect_list_type(first_run.text)
+            if list_type:
+                para.style = list_type
+                first_run.text = cleaned_text
+            # FIX: no more size/bold override here — each run already got
+            # its correct size and bold from the PDF span itself. Forcing
+            # a uniform heading size across the whole paragraph destroyed
+            # accurate per-run styling (this caused name+title+contact to
+            # merge into one giant bold line).
 
+        # FIX: this whole loop — the part that actually writes text into
+        # the paragraph — had gone missing, which is why every paragraph
+        # came out empty.
         for line_index, line in enumerate(lines):
             if prev_line_bbox is not None:
                 gap = line["bbox"][1] - prev_line_bbox[3]
@@ -150,12 +147,11 @@ def add_block_to_container(container, block, page_width_pt=None, content_bounds=
             prev_line_bbox = line["bbox"]
 
         apply_heading_style_to(paragraph, max_size_in_paragraph)
-
-        # Content-width-aware center detection. A full-width body
-        # paragraph's midpoint often lands near the content center too
-        # (symmetric margins) — that used to false-positive as "centered".
-        # A block is only centered when it's clearly NARROWER than the
-        # content column (a heading, a short line, a page number).
+        if horizontal_lines and content_bounds:
+            min_x0, max_x1 = content_bounds
+            content_width = max_x1 - min_x0
+            if find_line_below(block["bbox"], horizontal_lines, content_width * 0.7):
+                set_paragraph_bottom_border(paragraph)
         if content_bounds:
             min_x0, max_x1 = content_bounds
             content_width = max_x1 - min_x0
@@ -178,8 +174,6 @@ def add_block_to_container(container, block, page_width_pt=None, content_bounds=
             if is_page_number or is_narrow_and_centered:
                 paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
         elif page_width_pt:
-            # fallback if content_bounds wasn't passed — old, less
-            # accurate behavior, kept only for backward compatibility
             block_bbox = block["bbox"]
             block_center = (block_bbox[0] + block_bbox[2]) / 2
             page_center = page_width_pt / 2
@@ -345,7 +339,10 @@ def convert_pdf_to_docx(pdf_path, docx_path):
         if found_tables:
             for table in found_tables.tables:
                 items.append({'bbox': table.bbox, 'kind': 'table', 'data': table.extract(),'table_obj':table})
-
+        print(f"[docx_builder] page {page_num+1}: tables found={len(table_bboxes)}")
+        for tb in table_bboxes:
+            print(f"  table bbox={tb}")
+        horizontal_lines = get_horizontal_lines(page)
         for block in text_dict["blocks"]:
             if block["type"] not in (0, 1):
                 continue
@@ -362,7 +359,15 @@ def convert_pdf_to_docx(pdf_path, docx_path):
                 continue
 
             items.append({'bbox': block_bbox, 'kind': 'block', 'data': block})
-
+        print(f"[docx_builder] page {page_num+1}: total items={len(items)}")
+        for i in items:
+            block_bbox = i['bbox']
+            preview = ""
+            if i['kind'] == 'block' and i['data']['type'] == 0:
+                preview = " ".join(
+                    span["text"] for line in i['data']["lines"] for span in line["spans"]
+                )[:50]
+            print(f"  item kind={i['kind']} bbox={block_bbox} width={block_bbox[2]-block_bbox[0]:.1f} text='{preview}'")
         narrow_items = [
             i for i in items
             if (i['bbox'][2] - i['bbox'][0]) < FULL_WIDTH_RATIO_THRESHOLD * page_width_pt
@@ -381,7 +386,7 @@ def convert_pdf_to_docx(pdf_path, docx_path):
                     add_table_to_doc(document, item['data'], usable_width_in,page,item.get('table_obj'))
 
                 else:
-                    add_block_to_container(document, item['data'], page_width_pt, content_bounds)
+                    add_block_to_container(document, item['data'], page_width_pt, content_bounds,horizontal_lines)
 
             render_two_column_table(document, groups['left'], groups['right'],
                                      gap_start, gap_end, page_width_pt,
@@ -391,7 +396,7 @@ def convert_pdf_to_docx(pdf_path, docx_path):
                 if item['kind'] == 'table':
                  add_table_to_doc(document, item['data'], usable_width_in,page,item.get('table_obj'))
                 else:
-                    add_block_to_container(document, item['data'], page_width_pt, content_bounds)
+                    add_block_to_container(document, item['data'], page_width_pt, content_bounds,horizontal_lines)
 
             continue  # this page is done — skip the single-column loop below
 
@@ -403,7 +408,7 @@ def convert_pdf_to_docx(pdf_path, docx_path):
             if item['kind'] == 'table':
                 add_table_to_doc(document, item['data'], usable_width_in,page,item.get('table_obj'))
             else:
-                add_block_to_container(document, item['data'], page_width_pt, content_bounds)
+                add_block_to_container(document, item['data'], page_width_pt, content_bounds,horizontal_lines)
 
     document.save(docx_path)
     pdf.close()
@@ -421,3 +426,22 @@ def add_picture_to_container(container, image_stream, width_in):
         paragraph = container.add_paragraph()
         run = paragraph.add_run()
         run.add_picture(image_stream, width=Inches(width_in))
+
+def set_paragraph_bottom_border(paragraph, sz=6, color="000000"):
+    pPr = paragraph._p.get_or_add_pPr()
+    pBdr = OxmlElement('w:pBdr')
+    bottom = OxmlElement('w:bottom')
+    bottom.set(qn('w:val'), 'single')
+    bottom.set(qn('w:sz'), str(sz))
+    bottom.set(qn('w:space'), '1')
+    bottom.set(qn('w:color'), color)
+    pBdr.append(bottom)
+    pPr.append(pBdr)
+
+
+def find_line_below(block_bbox, horizontal_lines, min_width_pt):
+    bottom_y = block_bbox[3]
+    for y, x0, x1, width in horizontal_lines:
+        if 0 <= (y - bottom_y) <= 8 and (x1 - x0) >= min_width_pt:
+            return True
+    return False

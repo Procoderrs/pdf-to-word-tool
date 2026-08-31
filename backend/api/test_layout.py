@@ -1,12 +1,13 @@
-import pymupdf4llm
-md = pymupdf4llm.to_markdown("/Users/abdulrehman/Downloads/df.pdf")
-print("LENGTH:", len(md))
-print(repr(md[:500]))
+import fitz
 
+pdf = fitz.open("/Users/abdulrehman/Downloads/Zeenat_Riaz_CV.pdf")  # apna actual CV path daalo
+page = pdf[0]
+
+print("=== Drawings (vector lines/rects) ===")
 for i, d in enumerate(page.get_drawings()):
     print(f"--- drawing {i} ---")
     print("fill:", d.get("fill"))
     print("color:", d.get("color"))
-    print("fill_opacity:", d.get("fill_opacity"))
+    print("width:", d.get("width"))
     for item in d["items"]:
-        print("  item:", item[0], item[1] if len(item) > 1 else None)
+        print("  item:", item)

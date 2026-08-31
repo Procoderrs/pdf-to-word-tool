@@ -7,11 +7,23 @@ from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 from docx.shared import Pt
 from collections import Counter
-
+import re
 FULL_WIDTH_RATIO_THRESHOLD = 0.6
 MIN_GUTTER_WIDTH = 14  # lowered from 20 -> catches tighter gutters (sidebar resumes etc.)
 DEFAULT_FONT_NAME = "Calibri"
 
+
+BULLET_CHARS = ('•', '◦', '▪', '‣', '·')
+NUMBERED_PATTERN = re.compile(r'^\s*(\d+[.)]|\(\d+\))\s+')
+
+def detect_list_type(text):
+    stripped = text.lstrip()
+    if stripped and stripped[0] in BULLET_CHARS:
+        return 'List Bullet', stripped[1:].lstrip()
+    match = NUMBERED_PATTERN.match(stripped)
+    if match:
+        return 'List Number', stripped[match.end():]
+    return None, text
 
 def clean_font_name(raw_font_name):
     if not raw_font_name:
@@ -107,17 +119,20 @@ def find_column_gap(narrow_items, page_width):
     widest_width, gap_start, gap_end = gaps[0]
     gap_center_ratio = ((gap_start + gap_end) / 2) / page_width
 
-    # DEBUG: leave this print in until the 2-column case is confirmed fixed
-    # on your actual resume PDFs — send me this output if it still misfires.
-    print(f"[layout_parser] gap candidate: width={widest_width:.1f}pt center_ratio={gap_center_ratio:.2f}")
+    # FIX: require real support on BOTH sides — a single item on one
+    # side (e.g. a right-aligned date next to a section heading) isn't
+    # a genuine 2-column layout, just incidental right-alignment.
+    left_count = sum(1 for item in narrow_items if item['bbox'][2] <= gap_start)
+    right_count = sum(1 for item in narrow_items if item['bbox'][0] >= gap_end)
+    print(f"[layout_parser] gap candidate: width={widest_width:.1f}pt center_ratio={gap_center_ratio:.2f} left_count={left_count} right_count={right_count}")
 
-    # NOTE: widened the acceptable center range (0.15-0.85, was 0.2-0.8) and
-    # lowered MIN_GUTTER_WIDTH (14, was 20) — sidebar-style resumes often
-    # have a tighter/off-center gutter than a classic magazine 2-column page.
+    MIN_ITEMS_PER_SIDE = 2
+    if left_count < MIN_ITEMS_PER_SIDE or right_count < MIN_ITEMS_PER_SIDE:
+        return None
+
     if widest_width >= MIN_GUTTER_WIDTH and 0.15 <= gap_center_ratio <= 0.85:
         return (gap_start, gap_end)
     return None
-
 
 def assign_to_column(bbox, gap_start, gap_end, page_width):
     bx0, bx1 = bbox[0], bbox[2]
@@ -251,3 +266,26 @@ def get_page_background_color(page):
     if count < 3:
         return None
     return tuple(most_common_color[:3])  # drop alpha if present
+
+
+def get_horizontal_lines(page):
+    """Detects horizontal ruling lines (e.g. underlines below section
+    headings) drawn as vector line segments in the PDF."""
+    lines = []
+    seen = set()
+    for d in page.get_drawings():
+        width = d.get("width")
+        for item in d["items"]:
+            if item[0] != "l":
+                continue
+            p1, p2 = item[1], item[2]
+            if abs(p1.y - p2.y) > 0.5:
+                continue
+            y = round((p1.y + p2.y) / 2, 1)
+            x0, x1 = sorted([p1.x, p2.x])
+            key = (y, round(x0), round(x1))
+            if key in seen:
+                continue
+            seen.add(key)
+            lines.append((y, x0, x1, width))
+    return lines
