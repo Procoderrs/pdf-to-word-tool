@@ -11,9 +11,11 @@ import re
 FULL_WIDTH_RATIO_THRESHOLD = 0.6
 MIN_GUTTER_WIDTH = 14  # lowered from 20 -> catches tighter gutters (sidebar resumes etc.)
 DEFAULT_FONT_NAME = "Calibri"
+COLUMN_GAP_STRADDLE_TOLERANCE_PT = 4  # slack when checking if a pair sits on either side of the real column gap
 
 
-BULLET_CHARS = ('•', '◦', '▪', '‣', '·')
+BULLET_CHARS = ('•', '◦', '▪', '‣', '·', '●', '○', '■')
+
 NUMBERED_PATTERN = re.compile(r'^\s*(\d+[.)]|\(\d+\))\s+')
 
 def detect_list_type(text):
@@ -119,9 +121,9 @@ def find_column_gap(narrow_items, page_width):
     widest_width, gap_start, gap_end = gaps[0]
     gap_center_ratio = ((gap_start + gap_end) / 2) / page_width
 
-    # FIX: require real support on BOTH sides — a single item on one
-    # side (e.g. a right-aligned date next to a section heading) isn't
-    # a genuine 2-column layout, just incidental right-alignment.
+    # require real support on BOTH sides — a single item on one side
+    # (e.g. a right-aligned date next to a section heading) isn't a
+    # genuine 2-column layout, just incidental right-alignment.
     left_count = sum(1 for item in narrow_items if item['bbox'][2] <= gap_start)
     right_count = sum(1 for item in narrow_items if item['bbox'][0] >= gap_end)
     print(f"[layout_parser] gap candidate: width={widest_width:.1f}pt center_ratio={gap_center_ratio:.2f} left_count={left_count} right_count={right_count}")
@@ -289,3 +291,164 @@ def get_horizontal_lines(page):
             seen.add(key)
             lines.append((y, x0, x1, width))
     return lines
+
+
+
+def split_line_by_large_gap(line):
+    """Detects if a line has two clusters separated by a gap much wider
+    than normal word-spacing (e.g. a heading + right-aligned links on
+    the same PDF line). Threshold is derived from the line's own font
+    size, not a fixed value. Returns (left_spans, right_spans) or
+    (all_spans, None) if no such split exists."""
+    spans = [s for s in line["spans"] if s["text"].strip()]
+    if len(spans) < 2:
+        return spans, None
+
+    avg_size = sum(s["size"] for s in spans) / len(spans)
+    threshold = avg_size * 3  # normal word gaps are well under 1 char-width
+
+    best_gap, best_idx = 0, None
+    for i in range(1, len(spans)):
+        gap = spans[i]["bbox"][0] - spans[i - 1]["bbox"][2]
+        if gap > best_gap:
+            best_gap, best_idx = gap, i
+
+    if best_gap > threshold:
+        return spans[:best_idx], spans[best_idx:]
+    return spans, None
+
+
+
+def merge_lines_by_y(lines_a, lines_b):
+    combined = list(lines_a)
+    for lb in lines_b:
+        matched = False
+        for i, la in enumerate(combined):
+            if abs(la["bbox"][1] - lb["bbox"][1]) < 3:
+                new_bbox = (
+                    min(la["bbox"][0], lb["bbox"][0]),
+                    min(la["bbox"][1], lb["bbox"][1]),
+                    max(la["bbox"][2], lb["bbox"][2]),
+                    max(la["bbox"][3], lb["bbox"][3]),
+                )
+                combined[i] = {**la, "spans": la["spans"] + lb["spans"], "bbox": new_bbox}
+                matched = True
+                break
+        if not matched:
+            combined.append(lb)
+    combined.sort(key=lambda l: l["bbox"][1])
+    return combined
+
+
+def _pair_straddles_column_gap(left_bbox, right_bbox, column_gap):
+    """FIX (root cause of the recipe/newsletter/sidebar-CV regression):
+    a real two-column layout ALSO looks like "two blocks, same row,
+    gap in between" — a numbered step in the left column and another
+    numbered step in the right column, a sidebar heading and a main-
+    column heading, an image column and a text column. Blind same-row
+    merging (merge_same_line_blocks, find_row_pairs) can't tell that
+    apart from a genuine single-line split (job title + right-aligned
+    date), so it must be told where the real column gap is and skip
+    any pair that sits cleanly on opposite sides of it.
+    """
+    if not column_gap:
+        return False
+    gap_start, gap_end = column_gap
+    return (
+        left_bbox[2] <= gap_start + COLUMN_GAP_STRADDLE_TOLERANCE_PT
+        and right_bbox[0] >= gap_end - COLUMN_GAP_STRADDLE_TOLERANCE_PT
+    )
+
+
+def merge_same_line_blocks(items, column_gap=None):
+    """PyMuPDF sometimes splits text that visually sits on the same line
+    (e.g. a job title and a right-aligned date range) into two separate
+    blocks. Detect blocks whose vertical ranges overlap heavily and
+    merge them into one, so they render as a single line with a right
+    tab-stop, instead of ending up on separate lines.
+
+    column_gap: the real 2-column gap already detected on this page
+    BEFORE any same-line merging (see convert_pdf_to_docx). Any
+    candidate pair straddling that gap is left un-merged — see
+    _pair_straddles_column_gap.
+    """
+    block_items = [i for i in items if i['kind'] == 'block' and i['data']['type'] == 0]
+    other_items = [i for i in items if not (i['kind'] == 'block' and i['data']['type'] == 0)]
+
+    used = set()
+    merged = []
+    for idx, item in enumerate(block_items):
+        if idx in used:
+            continue
+        bbox = item['bbox']
+        partner = None
+        for jdx in range(idx + 1, len(block_items)):
+            if jdx in used:
+                continue
+            obbox = block_items[jdx]['bbox']
+            overlap = min(bbox[3], obbox[3]) - max(bbox[1], obbox[1])
+            min_height = min(bbox[3] - bbox[1], obbox[3] - obbox[1])
+            if min_height > 0 and overlap / min_height > 0.5:
+                # NEW GUARD: skip if this pair is really two separate
+                # columns, not a same-line split.
+                left_bbox, right_bbox = (
+                    (bbox, obbox) if bbox[0] <= obbox[0] else (obbox, bbox)
+                )
+                if _pair_straddles_column_gap(left_bbox, right_bbox, column_gap):
+                    continue
+                partner = jdx
+                break
+        if partner is not None:
+            other = block_items[partner]
+            used.add(partner)
+            left, right = (item, other) if item['bbox'][0] <= other['bbox'][0] else (other, item)
+            merged_bbox = (
+                min(left['bbox'][0], right['bbox'][0]),
+                min(left['bbox'][1], right['bbox'][1]),
+                max(left['bbox'][2], right['bbox'][2]),
+                max(left['bbox'][3], right['bbox'][3]),
+            )
+            merged_data = dict(left['data'])
+            merged_data['lines'] = merge_lines_by_y(left['data']['lines'], right['data']['lines'])
+            merged.append({'bbox': merged_bbox, 'kind': 'block', 'data': merged_data})
+        else:
+            merged.append(item)
+        used.add(idx)
+
+    return merged + other_items
+
+
+
+def merge_overlapping_lines(lines):
+    """PyMuPDF sometimes represents two visually-same-row text runs
+    (e.g. a title and a right-aligned link list) as two separate 'line'
+    entries with heavily overlapping y-ranges, instead of as multiple
+    spans within one line. Merge such lines together first, so the
+    same-line gap/tab-stop logic can see all spans on that row.
+
+    NOTE: this only merges LINES WITHIN A SINGLE BLOCK — it never
+    crosses a block boundary, so it can't straddle a real column gap
+    the way merge_same_line_blocks / find_row_pairs could. No guard
+    needed here."""
+    if not lines:
+        return lines
+    merged = [dict(lines[0])]
+    merged[-1]["spans"] = list(lines[0]["spans"])
+    for line in lines[1:]:
+        prev = merged[-1]
+        top = max(prev["bbox"][1], line["bbox"][1])
+        bottom = min(prev["bbox"][3], line["bbox"][3])
+        overlap = bottom - top
+        min_height = min(prev["bbox"][3] - prev["bbox"][1], line["bbox"][3] - line["bbox"][1])
+        if min_height > 0 and overlap / min_height > 0.4:
+            prev["spans"] = prev["spans"] + line["spans"]
+            prev["bbox"] = (
+                min(prev["bbox"][0], line["bbox"][0]),
+                min(prev["bbox"][1], line["bbox"][1]),
+                max(prev["bbox"][2], line["bbox"][2]),
+                max(prev["bbox"][3], line["bbox"][3]),
+            )
+        else:
+            merged.append(dict(line))
+            merged[-1]["spans"] = list(line["spans"])
+    return merged
