@@ -30,11 +30,21 @@ CENTER_TOLERANCE_PT = 15  # how close a block's center must be to the content ce
 NARROW_BLOCK_RATIO = 0.85  # a block must be narrower than this fraction of content width to be eligible for centering
 ROW_PAIR_MIN_Y_OVERLAP_RATIO = 0.5  # how much two blocks' y-ranges must overlap to count as "same row"
 COLUMN_GAP_STRADDLE_TOLERANCE_PT = 4  # slack when checking if a pair sits on either side of the real column gap
-FULL_WIDTH_BULLET_INDENT_PT = 36  # hanging indent for bullets rendered at full page width (single column)
-NARROW_CONTAINER_BULLET_INDENT_PT = 18  # FIX: smaller indent for bullets rendered inside a narrow 2-column table cell —
-                                          # 36pt was eating too much of a narrow cell's width, squeezing/wrapping bullet
-                                          # text badly (this is what broke bullets in 2-column layouts like the CV
-                                          # sidebar, recipe ingredients list, etc. after the earlier 36pt change)
+
+# --- Bullet indent settings ---
+# A bullet's total horizontal position is TWO separate spaces, and Word
+# itself distinguishes them the same way:
+#   [ LEFT OFFSET ][ bullet marker ][ MARKER-TO-TEXT GAP ][ text... ]
+#   ^ margin to bullet                ^ bullet to text
+# Previously only the marker-to-text gap was configurable (left_indent
+# and first_line_indent were both set to the SAME value, which pins the
+# bullet marker at left_indent + first_line_indent = 0 — i.e. right at
+# the margin, with zero left offset). This adds the missing left-offset
+# control.
+FULL_WIDTH_BULLET_LEFT_OFFSET_PT = 18  # NEW: space from the margin to the bullet marker itself (single-column pages)
+FULL_WIDTH_BULLET_GAP_PT = 20  # space from the bullet marker to its text (single-column pages)
+NARROW_CONTAINER_BULLET_LEFT_OFFSET_PT = 9  # same, but for bullets inside a narrow 2-column table cell
+NARROW_CONTAINER_BULLET_GAP_PT = 18  # same, but for bullets inside a narrow 2-column table cell
 
 
 def detect_page_margins(pdf, page_width_pt):
@@ -218,13 +228,10 @@ def add_block_to_container(container, block, page_width_pt=None, content_bounds=
     page_width_pt / content_bounds are optional; when given, enables
     content-width-aware center-alignment detection for the block.
 
-    narrow_container: FIX — set True when this block is being rendered
-    inside a 2-column table cell (see render_two_column_table below),
-    so bullet hanging-indent uses a smaller value than at full page
-    width. A single fixed 36pt indent worked fine for full-width single-
-    column pages but ate too much of a narrow cell's width, squeezing
-    or badly wrapping bullet text in every 2-column layout (CV sidebar,
-    recipe ingredients column, etc.)."""
+    narrow_container: set True when this block is being rendered inside
+    a 2-column table cell (see render_two_column_table below), so
+    bullets use the smaller (narrow-container) offset/gap constants
+    instead of the full-width ones."""
     if block["type"] == 0:
         lines = block["lines"]
         lines = merge_overlapping_lines(lines)
@@ -247,9 +254,12 @@ def add_block_to_container(container, block, page_width_pt=None, content_bounds=
         prev_span = None
         prev_line_bbox = None
 
-        bullet_indent_pt = (
-            NARROW_CONTAINER_BULLET_INDENT_PT if narrow_container else FULL_WIDTH_BULLET_INDENT_PT
-        )
+        if narrow_container:
+            bullet_left_offset_pt = NARROW_CONTAINER_BULLET_LEFT_OFFSET_PT
+            bullet_gap_pt = NARROW_CONTAINER_BULLET_GAP_PT
+        else:
+            bullet_left_offset_pt = FULL_WIDTH_BULLET_LEFT_OFFSET_PT
+            bullet_gap_pt = FULL_WIDTH_BULLET_GAP_PT
 
         def apply_heading_style_to(para, size):
             if not para.runs:
@@ -259,8 +269,14 @@ def add_block_to_container(container, block, page_width_pt=None, content_bounds=
             if list_type:
                 para.style = list_type
                 first_run.text = cleaned_text
-                para.paragraph_format.left_indent = Pt(bullet_indent_pt)
-                para.paragraph_format.first_line_indent = Pt(-bullet_indent_pt)
+                # FIX: left_indent now = offset-from-margin + marker-to-text
+                # gap, so the bullet marker itself sits at
+                # left_indent + first_line_indent = bullet_left_offset_pt
+                # (i.e. indented from the margin), instead of always at 0.
+                # first_line_indent stays -bullet_gap_pt so the text after
+                # the marker starts exactly bullet_gap_pt past the marker.
+                para.paragraph_format.left_indent = Pt(bullet_left_offset_pt + bullet_gap_pt)
+                para.paragraph_format.first_line_indent = Pt(-bullet_gap_pt)
                 para.paragraph_format.space_after = Pt(2)
 
         def line_max_size(line):
@@ -447,9 +463,6 @@ def render_two_column_table(document, left_items, right_items, gap_start, gap_en
     left_cell.paragraphs[0].text = ""
     right_cell.paragraphs[0].text = ""
 
-    # FIX: narrow_container=True — these cells are only a fraction of the
-    # page width, so bullets here need the smaller indent (see
-    # NARROW_CONTAINER_BULLET_INDENT_PT above).
     for item in left_items:
         if item['kind'] == 'row_pair':
             add_row_pair_to_container(left_cell, item, None)
