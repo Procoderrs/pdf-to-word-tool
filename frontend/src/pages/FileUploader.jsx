@@ -5,18 +5,18 @@ import api from "../../api/api";
 const steps = [
   {
     n: "01",
-    title: "Upload your PDF",
-    desc: "Drag a file in or click to browse.",
+    title: "Upload your PDF file",
+    desc: "Drag a .pdf file in or click to browse.",
   },
   {
     n: "02",
-    title: "We rebuild it",
-    desc: "The layout is read and reconstructed as real, editable paragraphs — not a scanned image.",
+    title: "We convert it",
+    desc: "Each page is rendered and turned into an editable presentation slide.",
   },
   {
     n: "03",
     title: "Download the result",
-    desc: "Your .docx is ready to download and edit.",
+    desc: "Your .pptx is ready to download and share.",
   },
 ];
 
@@ -31,11 +31,11 @@ const features = [
   },
   {
     title: "Keeps formatting",
-    desc: "Fonts, spacing and layout are preserved as closely as possible.",
+    desc: "Layout and visuals are preserved as closely as possible.",
   },
   {
-    title: "Honest about limits",
-    desc: "You'll get a clear heads-up if a page couldn't be rebuilt perfectly.",
+    title: "Reliable output",
+    desc: "Rendered with a real document engine, not a lookalike converter.",
   },
 ];
 
@@ -44,15 +44,13 @@ export default function FileUploader() {
   const [loading, setLoading] = useState(false);
   const [downloadUrl, setDownloadUrl] = useState(null);
   const [error, setError] = useState(null);
-  const [imageOnlyWarning, setImageOnlyWarning] = useState(false);
 
   const onDrop = useCallback((acceptedFiles, rejectedFiles) => {
     setDownloadUrl(null);
     setError(null);
-    setImageOnlyWarning(false);
 
     if (rejectedFiles?.length) {
-      setError("Only valid PDF files are supported.");
+      setError("Only valid PDF (.pdf) files are supported.");
       return;
     }
 
@@ -68,7 +66,9 @@ export default function FileUploader() {
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
-    accept: { "application/pdf": [".pdf"] },
+    accept: {
+      "application/pdf": [".pdf"],
+    },
     maxFiles: 1,
   });
 
@@ -76,19 +76,14 @@ export default function FileUploader() {
     if (!file) return;
     setLoading(true);
     setError(null);
-    setImageOnlyWarning(false);
     const formData = new FormData();
     formData.append("pdfFile", file);
 
     try {
-      const res = await api.post("/api/convert", formData, {
+      const res = await api.post("/api/pdf/convert", formData, {
         responseType: "blob",
         headers: { "Content-Type": "multipart/form-data" },
       });
-
-      if (res.headers["x-conversion-mode"] === "image-only") {
-        setImageOnlyWarning(true);
-      }
 
       const url = window.URL.createObjectURL(new Blob([res.data]));
       setDownloadUrl(url);
@@ -116,7 +111,6 @@ export default function FileUploader() {
     setFile(null);
     setDownloadUrl(null);
     setError(null);
-    setImageOnlyWarning(false);
   };
 
   const formatSize = (bytes) => {
@@ -146,10 +140,10 @@ export default function FileUploader() {
             <div className="w-7 h-7 border-2 border-[#9F2B1E] rounded-sm flex items-center justify-center -rotate-6">
               <span className="text-[#9F2B1E] font-mono text-[10px] font-bold">PDF</span>
             </div>
-            <span className="font-serif text-lg font-semibold tracking-tight">PdfToWord</span>
+            <span className="font-serif text-lg font-semibold tracking-tight">PdfToPptx</span>
           </div>
           <span className="font-mono text-xs uppercase tracking-widest text-[#6E685F]">
-            PDF &rarr; DOCX
+            PDF &rarr; PPTX
           </span>
         </div>
       </header>
@@ -172,15 +166,13 @@ export default function FileUploader() {
                 Local conversion, not a middleman
               </p>
               <h1 className="font-serif text-4xl md:text-5xl font-semibold leading-tight text-[#1C1B19]">
-                Turn any PDF into an editable Word file
+                Turn any PDF into a presentation
               </h1>
               <p className="mt-5 text-[#6E685F] text-lg leading-relaxed max-w-md">
-                Upload a PDF and get back a clean .docx you can actually edit
-                — rebuilt paragraph by paragraph, right here, with no
-                third-party converter in between.
+                Upload a .pdf file and get back a clean .pptx that looks
+                exactly like the original — no third-party converter in
+                between.
               </p>
-
-              
             </div>
 
             {/* Tool card */}
@@ -201,7 +193,7 @@ export default function FileUploader() {
                     ) : (
                       <div>
                         <p className="text-sm font-medium text-[#1C1B19]">
-                          {isDragActive ? "Drop it here" : "Drag a PDF here"}
+                          {isDragActive ? "Drop it here" : "Drag a PDF file here"}
                         </p>
                         <p className="text-xs text-[#6E685F] mt-1">or click to browse — max one file</p>
                       </div>
@@ -216,7 +208,7 @@ export default function FileUploader() {
                     className="mt-5 w-full bg-[#1C1B19] text-[#FDFCFA] text-sm font-medium py-3 rounded-lg
                       hover:bg-[#33312D] transition disabled:opacity-40 disabled:cursor-not-allowed"
                   >
-                    {loading ? "Reconstructing layout..." : "Convert to Word"}
+                    {loading ? "Converting..." : "Convert to PPTX"}
                   </button>
 
                   {file && !loading && (
@@ -239,22 +231,15 @@ export default function FileUploader() {
 
                   <p className="text-sm font-medium text-[#1C1B19] mt-5">Your file is ready</p>
                   <p className="font-mono text-xs text-[#6E685F] mt-1 mb-6">
-                    {file?.name.replace(".pdf", ".docx")}
+                    {file?.name.replace(".pdf", ".pptx")}
                   </p>
 
-                  {imageOnlyWarning && (
-                    <p className="text-xs text-[#7A5A16] bg-[#A9822E]/10 border border-[#A9822E]/40 rounded-md px-3 py-2 mb-4 text-left">
-                      This PDF appears to be scanned or image-based — the text couldn't be
-                      made editable. The images have been embedded as-is.
-                    </p>
-                  )}
-
-                  
-                     <a href={downloadUrl}
-                    download={file?.name.replace(".pdf", ".docx")}
+                  <a
+                    href={downloadUrl}
+                    download={file?.name.replace(".pdf", ".pptx")}
                     className="block w-full bg-[#9F2B1E] text-white text-sm font-medium py-3 rounded-lg hover:bg-[#831F14] transition text-center"
                   >
-                    Download .docx
+                    Download .pptx
                   </a>
                   <button
                     onClick={reset}
@@ -288,8 +273,8 @@ export default function FileUploader() {
       <section className="border-t border-[#D8D3C7] bg-[#FDFCFA]">
         <div className="max-w-5xl mx-auto px-6 py-6">
           <p className="text-xs text-[#6E685F] text-center">
-            Complex layouts — multi-column pages, dense tables, or heavily designed
-            resumes — may shift slightly during conversion.
+            Each PDF page becomes one slide. Very complex or scanned pages
+            may shift slightly during conversion.
           </p>
         </div>
       </section>

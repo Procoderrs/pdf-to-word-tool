@@ -114,3 +114,53 @@ backend/tmp/
 *.sqlite
 *.sqlite3
 *.db
+
+
+
+# ==========================================
+# Node Backend (backend-2 — Word to PDF)
+# ==========================================
+
+# Dependencies
+backend-2/node_modules/
+
+# Environment variables
+backend-2/.env
+
+# npm logs
+backend-2/npm-debug.log*
+backend-2/yarn-debug.log*
+backend-2/yarn-error.log*
+backend-2/pnpm-debug.log*
+
+# Generated / temporary files (multer uploads before conversion, converted output)
+backend-2/uploads/
+backend-2/output/
+backend-2/temp/
+backend-2/tmp/
+
+
+
+
+
+# ==========================================
+# Node Backend (backend-2 — Word to PDF)
+# ==========================================
+
+# Dependencies
+backend-3/node_modules/
+
+# Environment variables
+backend-3/.env
+
+# npm logs
+backend-3/npm-debug.log*
+backend-3/yarn-debug.log*
+backend-3/yarn-error.log*
+backend-3/pnpm-debug.log*
+
+# Generated / temporary files (multer uploads before conversion, converted output)
+backend-3/uploads/
+backend-3/output/
+backend-3/temp/
+backend-3/tmp/
