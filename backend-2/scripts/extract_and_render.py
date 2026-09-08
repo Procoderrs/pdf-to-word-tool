@@ -24,8 +24,10 @@ def extract_pdf(pdf_path, output_dir, dpi=120):
         page_width = page.rect.width
         page_height = page.rect.height
 
+        # snapshot BEFORE any redaction — used for sampling bg colors
         pre_pix = page.get_pixmap(dpi=dpi)
 
+        # ---------------- TEXT EXTRACTION ----------------
         text_dict = page.get_text("dict")
         spans_data = []
 
@@ -67,6 +69,47 @@ def extract_pdf(pdf_path, output_dir, dpi=120):
                 bg_color = get_bg_color(pre_pix, (x0 + x1) / 2, y0 - 1, dpi=dpi)
                 page.add_redact_annot(fitz.Rect(x0, y0, x1, y1), fill=bg_color)
 
+        # ---------------- IMAGE EXTRACTION ----------------
+        images_data = []
+        image_list = page.get_image_info(xrefs=True)
+
+        for idx, info in enumerate(image_list):
+            xref = info.get("xref")
+            bbox = info["bbox"]  # (x0, y0, x1, y1) in page points
+
+            if not xref:
+                continue
+
+            # skip tiny/decorative images (icons, bullets, hairline rects etc.)
+            if (bbox[2] - bbox[0]) < 5 or (bbox[3] - bbox[1]) < 5:
+                continue
+
+            try:
+                base_image = doc.extract_image(xref)
+            except Exception:
+                continue
+
+            img_bytes = base_image.get("image")
+            ext = base_image.get("ext", "png")
+            if not img_bytes:
+                continue
+
+            img_filename = f"page-{page_num + 1}-img-{idx}.{ext}"
+            img_out_path = os.path.join(output_dir, img_filename)
+            with open(img_out_path, "wb") as f:
+                f.write(img_bytes)
+
+            images_data.append({
+                "x0": bbox[0], "y0": bbox[1], "x1": bbox[2], "y1": bbox[3],
+                "image": img_out_path,
+            })
+
+            # blank this region out of the background raster so it
+            # isn't duplicated behind the separately-added image
+            page.add_redact_annot(fitz.Rect(bbox), fill=(1, 1, 1))
+
+        # apply BOTH text and image redactions together, then take the
+        # final "clean" background render
         page.apply_redactions()
 
         pix = page.get_pixmap(dpi=dpi)
@@ -79,6 +122,7 @@ def extract_pdf(pdf_path, output_dir, dpi=120):
             "height": page_height,
             "image": img_path,
             "spans": spans_data,
+            "images": images_data,
         })
 
     return pages_data

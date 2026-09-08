@@ -31,6 +31,7 @@ const extractPdfData = async (pdfPath, outputDir) => {
   const jsonContent = fs.readFileSync(jsonPath, 'utf-8');
   return JSON.parse(jsonContent);
 };
+
 const buildPptxFromData = async (pagesData, outputDir) => {
   const pptx = new pptxgen();
 
@@ -44,32 +45,54 @@ const buildPptxFromData = async (pagesData, outputDir) => {
   for (const page of pagesData) {
     const slide = pptx.addSlide();
 
+    // 1) background raster — text AND images are now redacted out of this,
+    // so it's just page layout/graphics
     slide.addImage({ path: page.image, x: 0, y: 0, w: widthIn, h: heightIn });
 
-   for (const span of page.spans) {
-  const x = span.x0 / POINTS_PER_INCH;
-  const y = span.y0 / POINTS_PER_INCH;
-  const w = (span.x1 - span.x0) / POINTS_PER_INCH;
-  const h = (span.y1 - span.y0) / POINTS_PER_INCH;
+    // 2) actual images as separate, independently editable/movable objects
+    for (const img of page.images || []) {
+      const x = img.x0 / POINTS_PER_INCH;
+      const y = img.y0 / POINTS_PER_INCH;
+      const w = (img.x1 - img.x0) / POINTS_PER_INCH;
+      const h = (img.y1 - img.y0) / POINTS_PER_INCH;
 
-  slide.addText(span.text, {
-  x, y,
-  w: Math.max(w, 0.1) + 0.15,
-  h: Math.max(h, 0.1) + 0.03,
-  fontSize: Math.max(Math.round(span.size * 0.95), 6),
-  fontFace: mapFontName(span.font),
-  color: span.color,
-  bold: span.bold,
-  italic: span.italic,
-  margin: 0,
-  valign: 'top',
-  align: 'left',
-  wrap: false,
-  fit: 'none',
-  fill: { type: 'none' },
-  line: { type: 'none' },
-});
-}
+      try {
+        slide.addImage({
+          path: img.image,
+          x, y,
+          w: Math.max(w, 0.1),
+          h: Math.max(h, 0.1),
+        });
+      } catch (e) {
+        console.error('Skipping image on slide, failed to add:', img.image, e.message);
+      }
+    }
+
+    // 3) text spans on top so they stay readable/editable
+    for (const span of page.spans) {
+      const x = span.x0 / POINTS_PER_INCH;
+      const y = span.y0 / POINTS_PER_INCH;
+      const w = (span.x1 - span.x0) / POINTS_PER_INCH;
+      const h = (span.y1 - span.y0) / POINTS_PER_INCH;
+
+      slide.addText(span.text, {
+        x, y,
+        w: Math.max(w, 0.1) + 0.15,
+        h: Math.max(h, 0.1) + 0.03,
+        fontSize: Math.max(Math.round(span.size * 0.95), 6),
+        fontFace: mapFontName(span.font),
+        color: span.color,
+        bold: span.bold,
+        italic: span.italic,
+        margin: 0,
+        valign: 'top',
+        align: 'left',
+        wrap: false,
+        fit: 'none',
+        fill: { type: 'none' },
+        line: { type: 'none' },
+      });
+    }
   }
 
   const pptxPath = path.join(outputDir, 'output.pptx');
