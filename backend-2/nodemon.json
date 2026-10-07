@@ -1,3 +1,0 @@
-{
-  "ignore": ["uploads/*", "temp/*", "node_modules/*", "venv/*"]
-}

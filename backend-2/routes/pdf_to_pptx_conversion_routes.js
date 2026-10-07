@@ -1,10 +1,11 @@
 import express from "express";
 import multer from "multer";
-import { convertPdfToPptx } from "../controllers/pdf_to_pptx_conversion_controller.js";
+
+ 
+
+import   convertPdfToPptxJS from '../controllers/pdfConvertController.js'
 
 const router = express.Router();
-const upload = multer({ dest: "uploads/" });   // temp storage location
-
-router.post("/convert", upload.single("pdfFile"), convertPdfToPptx);
-
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+router.post("/convert", upload.single("pdfFile"), convertPdfToPptxJS); 
 export default router;

@@ -18,6 +18,7 @@ app.get('/', (req, res) => {
 app.use('/api/pdf', PdfToPptx);          // ← original path, frontend isi ko already call kar raha hai
 app.use('/api/word', convertRoutes);      // ← naya, alag prefix, taake /api/pdf se clash na ho
 
+
 const startServer = async () => {
   const PORT = process.env.PORT || 5000;
   app.listen(PORT, () => console.log(`Server is running on PORT ${PORT}`));

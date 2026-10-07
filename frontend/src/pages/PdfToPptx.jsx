@@ -32,7 +32,7 @@ const PdfToPptx = () => {
 
     const selectedFile = acceptedFiles[0];
 
-    if (selectedFile && selectedFile.size > 15 * 1024 * 1024) {
+    if (selectedFile && selectedFile.size > 50 * 1024 * 1024) {
       setError("File size exceeds the 15MB safety limit.");
       return;
     }
